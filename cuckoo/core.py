@@ -154,10 +154,11 @@ class CuckooTable(object):
     # ------------------------------------------------------------------
     def _find(self, key):
         """Return (which, index) for a stored key, or None when it is absent."""
-        index = self._home(key, 1)
-        entry = self._tables[0][index]
-        if entry is not None and entry[0] == key:
-            return 1, index
+        for which in (1, 2):
+            index = self._home(key, which)
+            entry = self._tables[which - 1][index]
+            if entry is not None and entry[0] == key:
+                return which, index
         return None
 
     def get(self, key, default=None):
@@ -195,7 +196,7 @@ class CuckooTable(object):
             key, value = occupant
             self._kicks += 1
             where = 3 - where
-        return None
+        return key, value
 
     def _reset(self, capacity):
         """Replace both arrays with empty ones and reshuffle the second hash."""
@@ -223,12 +224,13 @@ class CuckooTable(object):
 
     def _needs_growth(self):
         """True when one more key would push the arrays past half full."""
-        return (self._count + 1) * 2 > self._capacity * GROWTH_FACTOR
+        return (self._count + 1) * 2 > self._capacity
 
     def _grow(self):
         """Double the arrays and seat the stored keys again."""
+        entries = list(self._entries())
         self._reset(self._capacity * GROWTH_FACTOR)
-        self._rebuild(list(self._entries()))
+        self._rebuild(entries)
 
     def put(self, key, value):
         """Store value under key, kicking and growing whenever it has to."""
@@ -236,13 +238,16 @@ class CuckooTable(object):
         found = self._find(key)
         if found is not None:
             which, index = found
-            self._tables[0][index] = (key, value)
+            self._tables[which - 1][index] = (key, value)
             return
         if self._needs_growth():
             self._grow()
         carry = self._place(key, value)
         if carry is not None:
-            self._rebuild(list(self._entries()))
+            entries = list(self._entries())
+            entries.append(carry)
+            self._reset(self._capacity * GROWTH_FACTOR)
+            self._rebuild(entries)
         self._count += 1
 
     def delete(self, key):
@@ -252,6 +257,7 @@ class CuckooTable(object):
         if found is None:
             return False
         which, index = found
+        self._tables[which - 1][index] = EMPTY
         self._count -= 1
         return True
 
@@ -260,9 +266,7 @@ class CuckooTable(object):
     # ------------------------------------------------------------------
     def items(self):
         """Every stored (key, value) pair, first array first, in slot order."""
-        for entry in self._tables[0]:
-            if entry is not None:
-                yield entry
+        return self._entries()
 
     def keys(self):
         return [key for key, _ in self.items()]
